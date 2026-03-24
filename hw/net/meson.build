@@ -71,3 +71,5 @@ stub_ss.add(files('rocker/rocker-stubs.c'))
 system_ss.add(files('rocker/rocker-hmp-cmds.c'))
 
 subdir('can')
+
+system_ss.add(when: 'CONFIG_HICAIN_VNIC', if_true: files('hicain_vnic.c'))
