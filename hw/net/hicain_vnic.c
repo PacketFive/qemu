@@ -354,10 +354,9 @@ static void hicain_vnic_exit(PCIDevice *pdev)
 
 static const Property hicain_vnic_properties[] = {
     DEFINE_PROP_STRING("socket_path", HicainVnicState, socket_path),
-    { }
 };
 
-static void hicain_vnic_class_init(ObjectClass *klass, void *data)
+static void hicain_vnic_class_init(ObjectClass *klass, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
     PCIDeviceClass *k = PCI_DEVICE_CLASS(klass);
