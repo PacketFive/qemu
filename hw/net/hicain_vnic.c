@@ -29,6 +29,7 @@
 #include "qemu/units.h"
 #include "hw/pci/pci.h"
 #include "hw/pci/msi.h"
+#include "hw/core/qdev-properties.h"
 #include "qom/object.h"
 #include "qapi/visitor.h"
 
@@ -351,7 +352,7 @@ static void hicain_vnic_exit(PCIDevice *pdev)
     msi_uninit(pdev);
 }
 
-static Property hicain_vnic_properties[] = {
+static const Property hicain_vnic_properties[] = {
     DEFINE_PROP_STRING("socket_path", HicainVnicState, socket_path),
     DEFINE_PROP_END_OF_LIST(),
 };
