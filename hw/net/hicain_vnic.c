@@ -354,7 +354,7 @@ static void hicain_vnic_exit(PCIDevice *pdev)
 
 static const Property hicain_vnic_properties[] = {
     DEFINE_PROP_STRING("socket_path", HicainVnicState, socket_path),
-    DEFINE_PROP_END_OF_LIST(),
+    { }
 };
 
 static void hicain_vnic_class_init(ObjectClass *klass, void *data)
