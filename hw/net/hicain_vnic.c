@@ -31,7 +31,6 @@
 #include "hw/pci/msi.h"
 #include "qom/object.h"
 #include "qapi/visitor.h"
-#include "sysemu/iothread.h"
 
 #include <sys/socket.h>
 #include <sys/un.h>
