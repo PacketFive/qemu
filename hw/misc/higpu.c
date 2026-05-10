@@ -24,7 +24,7 @@ DECLARE_INSTANCE_CHECKER(HigpuState, HIGPU, TYPE_HICAIN_HIGPU)
 #define HIGPU_DEVICE_ID     0xCA20
 
 #define HIGPU_BAR0_SIZE     (64 * KiB)
-#define HIGPU_BAR1_SIZE_DEFAULT  (8ULL * GiB)
+#define HIGPU_BAR1_SIZE_DEFAULT  (256 * MiB)
 
 #define REG_VENDOR_ID       0x000
 #define REG_DEVICE_ID       0x004
@@ -52,8 +52,6 @@ struct HigpuState {
     uint32_t lanes_per_sm;
     uint32_t tensor_size;
     uint64_t devmem_size;
-
-    void *devmem;
 
     uint32_t irq_status;
     uint32_t irq_mask;
@@ -156,12 +154,13 @@ static void higpu_realize(PCIDevice *pdev, Error **errp)
                           "higpu-bar0", HIGPU_BAR0_SIZE);
     pci_register_bar(pdev, 0, PCI_BASE_ADDRESS_SPACE_MEMORY, &s->bar0);
 
-    s->devmem = g_malloc0(s->devmem_size);
-    memory_region_init_ram_ptr(&s->bar1, OBJECT(s), "higpu-devmem",
-                               s->devmem_size, s->devmem);
+    memory_region_init_ram(&s->bar1, OBJECT(s), "higpu-devmem",
+                           s->devmem_size, errp);
+    if (*errp) {
+        return;
+    }
     pci_register_bar(pdev, 1,
                      PCI_BASE_ADDRESS_SPACE_MEMORY |
-                         PCI_BASE_ADDRESS_MEM_TYPE_64 |
                          PCI_BASE_ADDRESS_MEM_PREFETCH,
                      &s->bar1);
 
@@ -171,11 +170,7 @@ static void higpu_realize(PCIDevice *pdev, Error **errp)
 
 static void higpu_exit(PCIDevice *pdev)
 {
-    HigpuState *s = HIGPU(pdev);
-
     msi_uninit(pdev);
-    g_free(s->devmem);
-    s->devmem = NULL;
 }
 
 static const Property higpu_properties[] = {
