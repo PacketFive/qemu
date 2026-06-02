@@ -30,6 +30,8 @@
 #include "hw/pci/pci.h"
 #include "hw/pci/msi.h"
 #include "hw/core/qdev-properties.h"
+#include "hw/core/qdev-properties-system.h"
+#include "net/net.h"
 #include "qom/object.h"
 #include "qapi/visitor.h"
 
@@ -80,6 +82,18 @@ struct HicainVnicState {
     char *socket_path;
     int sock_fd;
 
+    /*
+     * MAC address.
+     *
+     * Exposed as a qdev property so each instance of -device
+     * hicain-vnic can be given a distinct address from the command
+     * line (mac=02:48:43:41:49:NN).  If not supplied the realize
+     * callback falls back to a deterministic per-PCI-slot value so
+     * we never default two VMs to the same address.
+     */
+    MACAddr conf_mac;
+    uint8_t mac[6];
+
     uint32_t tx_addr_lo;
     uint32_t tx_addr_hi;
     uint32_t tx_len;
@@ -92,8 +106,6 @@ struct HicainVnicState {
     uint32_t irq_status;
     uint32_t irq_mask;
     uint32_t link_status;
-
-    uint8_t mac[6];
 
     uint8_t rx_buf[HICAIN_MAX_FRAME];
     uint32_t rx_buf_len;
@@ -142,25 +154,50 @@ static void hicain_vnic_tx(HicainVnicState *s)
     hicain_vnic_update_irq(s);
 }
 
-static void hicain_vnic_check_rx(HicainVnicState *s)
+/*
+ * Drain one frame from the switch socket into the guest's pre-armed
+ * RX buffer and raise an IRQ.  Called both from the QEMU main-loop
+ * fd handler (event-driven; correct path) and from a guest read of
+ * REG_RX_STATUS (polled; kept as a fallback for guests that haven't
+ * yet enabled the IRQ_RX_COMPLETE mask).
+ *
+ * Returns true if a frame was consumed.  The single-buffer model
+ * means we only drain ONE frame per call: the guest must clear
+ * rx_status (by writing 0 to REG_RX_STATUS) before the next frame
+ * can land.  The fd handler is level-triggered so it will keep
+ * firing until the socket is drained, which gives the guest
+ * back-pressure that matches a real NIC's RX ring full condition.
+ */
+static bool hicain_vnic_drain_one_rx(HicainVnicState *s)
 {
     ssize_t len;
     uint64_t addr;
 
-    if (s->sock_fd < 0 || s->rx_status == RX_STATUS_READY) {
-        return;
+    if (s->sock_fd < 0) {
+        return false;
+    }
+    if (s->rx_status == RX_STATUS_READY) {
+        /*
+         * Previous frame not yet consumed by the guest.  Don't
+         * pull another off the wire or we'd lose it.
+         */
+        return false;
     }
 
     len = recv(s->sock_fd, s->rx_buf, HICAIN_MAX_FRAME, MSG_DONTWAIT);
     if (len <= 0) {
-        return;
+        return false;
     }
 
     s->rx_buf_len = len;
 
     addr = ((uint64_t)s->rx_addr_hi << 32) | s->rx_addr_lo;
     if (addr == 0) {
-        return;
+        /*
+         * Guest has not posted an RX buffer yet -- drop the frame
+         * (matches a real NIC's behaviour with an unarmed ring).
+         */
+        return true;
     }
 
     pci_dma_write(&s->pdev, addr, s->rx_buf, len);
@@ -169,6 +206,30 @@ static void hicain_vnic_check_rx(HicainVnicState *s)
 
     s->irq_status |= IRQ_RX_COMPLETE;
     hicain_vnic_update_irq(s);
+    return true;
+}
+
+static void hicain_vnic_rx_event(void *opaque)
+{
+    HicainVnicState *s = opaque;
+
+    /*
+     * The fd handler is level-triggered: if we don't drain or stop
+     * watching the socket while rx_status == RX_STATUS_READY, the
+     * main loop will busy-spin re-invoking us.  Drain one frame
+     * (capacity == 1) and let the next select(2) wake-up arrive
+     * after the guest acks REG_RX_STATUS.
+     */
+    hicain_vnic_drain_one_rx(s);
+}
+
+/* Kept for backwards compat with the polled callsite in
+ * hicain_vnic_mmio_read(REG_RX_STATUS).  The event-driven path
+ * above is the canonical one.
+ */
+static void hicain_vnic_check_rx(HicainVnicState *s)
+{
+    hicain_vnic_drain_one_rx(s);
 }
 
 static uint64_t hicain_vnic_mmio_read(void *opaque, hwaddr addr,
@@ -241,6 +302,12 @@ static void hicain_vnic_mmio_write(void *opaque, hwaddr addr,
     case REG_RX_STATUS:
         if (val == 0) {
             s->rx_status = RX_STATUS_EMPTY;
+            /*
+             * Guest released the RX buffer: if the socket has
+             * another frame already queued, deliver it now.  Saves
+             * one wake-up round-trip per packet at high rates.
+             */
+            hicain_vnic_drain_one_rx(s);
         }
         break;
     case REG_IRQ_STATUS:
@@ -310,6 +377,14 @@ static int hicain_vnic_connect(HicainVnicState *s)
     s->sock_fd = fd;
     s->link_status = LINK_STATUS_UP;
 
+    /*
+     * Hook the socket into the QEMU main loop so we get an RX
+     * callback as soon as the switch delivers a frame -- no need
+     * for the guest to poll REG_RX_STATUS.  Read-only watch
+     * (NULL write handler); level-triggered.
+     */
+    qemu_set_fd_handler(fd, hicain_vnic_rx_event, NULL, s);
+
     return 0;
 }
 
@@ -330,12 +405,29 @@ static void hicain_vnic_realize(PCIDevice *pdev, Error **errp)
     s->irq_status = 0;
     s->irq_mask = 0;
 
-    s->mac[0] = 0x02;
-    s->mac[1] = 0x48;
-    s->mac[2] = 0x43;
-    s->mac[3] = 0x41;
-    s->mac[4] = 0x49;
-    s->mac[5] = 0x00;
+    /*
+     * MAC address resolution.
+     *
+     *  - If the user passed mac=XX:XX:..  on -device, conf_mac.a is
+     *    non-zero and we use it verbatim.
+     *  - Otherwise derive a deterministic address from the PCI
+     *    devfn so multiple instances never collide:
+     *      02:48:43:41:49:<devfn>
+     *    The 02: prefix is the OUI locally-administered bit per
+     *    IEEE 802; the next 4 bytes spell "HCAI" in ASCII; devfn
+     *    keeps it stable across boots.
+     */
+    if (s->conf_mac.a[0] || s->conf_mac.a[1] || s->conf_mac.a[2] ||
+        s->conf_mac.a[3] || s->conf_mac.a[4] || s->conf_mac.a[5]) {
+        memcpy(s->mac, s->conf_mac.a, 6);
+    } else {
+        s->mac[0] = 0x02;
+        s->mac[1] = 0x48;
+        s->mac[2] = 0x43;
+        s->mac[3] = 0x41;
+        s->mac[4] = 0x49;
+        s->mac[5] = pdev->devfn & 0xff;
+    }
 
     hicain_vnic_connect(s);
 }
@@ -345,6 +437,7 @@ static void hicain_vnic_exit(PCIDevice *pdev)
     HicainVnicState *s = HICAIN_VNIC(pdev);
 
     if (s->sock_fd >= 0) {
+        qemu_set_fd_handler(s->sock_fd, NULL, NULL, NULL);
         close(s->sock_fd);
         s->sock_fd = -1;
     }
@@ -354,6 +447,7 @@ static void hicain_vnic_exit(PCIDevice *pdev)
 
 static const Property hicain_vnic_properties[] = {
     DEFINE_PROP_STRING("socket_path", HicainVnicState, socket_path),
+    DEFINE_PROP_MACADDR("mac", HicainVnicState, conf_mac),
 };
 
 static void hicain_vnic_class_init(ObjectClass *klass, const void *data)
