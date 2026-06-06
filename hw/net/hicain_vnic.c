@@ -374,6 +374,25 @@ static int hicain_vnic_connect(HicainVnicState *s)
     int flags = fcntl(fd, F_GETFL, 0);
     fcntl(fd, F_SETFL, flags | O_NONBLOCK);
 
+    /*
+     * Bump the UDS socket buffers.  The vNIC <-> switch channel
+     * has no flow control above the kernel socket buffer: once it
+     * fills, send() returns EAGAIN and we silently drop the
+     * frame.  At RoCEv2 RC line rate with multi-packet
+     * fragmentation a 64 KiB message produces 16 fragments
+     * back-to-back, so a default Linux UDS buffer (~208 KiB,
+     * ~22 jumbo frames) can fill before NAPI has scheduled the
+     * peer's drain handler.  Bump both directions to 8 MiB
+     * (~900 jumbo frames) which is enough to absorb the
+     * worst-case burst for our perftest gate (tx_depth=128 *
+     * nfrags=16 = 2048 frags in flight).
+     */
+    {
+        const int bufsz = 8 * 1024 * 1024;
+        (void)setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &bufsz, sizeof(bufsz));
+        (void)setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &bufsz, sizeof(bufsz));
+    }
+
     s->sock_fd = fd;
     s->link_status = LINK_STATUS_UP;
 
