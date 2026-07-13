@@ -29,6 +29,8 @@
 #include "qemu/units.h"
 #include "hw/pci/pci.h"
 #include "hw/pci/msi.h"
+#include "hw/pci/pcie.h"
+#include "qapi/error.h"
 #include "hw/core/qdev-properties.h"
 #include "hw/core/qdev-properties-system.h"
 #include "net/net.h"
@@ -45,8 +47,18 @@ typedef struct HicainVnicState HicainVnicState;
 DECLARE_INSTANCE_CHECKER(HicainVnicState, HICAIN_VNIC,
                          TYPE_HICAIN_VNIC)
 
-#define HICAIN_VENDOR_ID     0x1ED5
-#define HICAIN_DEVICE_ID     0xCA10
+/*
+ * PCI identity.
+ *
+ * EXPERIMENTAL IDs. hicain-vnic is a purely emulated device, so it uses the
+ * Red Hat / Qumranet vendor ID (0x1af4) with a device ID from the range
+ * 1af4:10f0-10ff that QEMU reserves for experimental use without
+ * registration (see docs/specs/pci-ids.rst). These MUST be replaced with an
+ * officially assigned 1b36 device ID (contact the QEMU PCI ID maintainer)
+ * before this device is submitted upstream or shipped in a product.
+ */
+#define HICAIN_VENDOR_ID     PCI_VENDOR_ID_REDHAT_QUMRANET
+#define HICAIN_DEVICE_ID     0x10F0
 
 #define HICAIN_MAX_FRAME     9216
 #define HICAIN_MMIO_SIZE     4096
@@ -93,6 +105,15 @@ struct HicainVnicState {
      */
     MACAddr conf_mac;
     uint8_t mac[6];
+
+    /*
+     * Advertised PCI Express link. These populate the Link Capabilities
+     * register so lspci -vv reports a realistic generation and width for
+     * a modern RDMA NIC. No serdes link is simulated; the values are for
+     * enumeration and teaching fidelity only. Defaults are Gen5 x16.
+     */
+    PCIExpLinkSpeed pcie_speed;
+    PCIExpLinkWidth pcie_width;
 
     uint32_t tx_addr_lo;
     uint32_t tx_addr_hi;
@@ -414,6 +435,12 @@ static void hicain_vnic_realize(PCIDevice *pdev, Error **errp)
     pci_config_set_interrupt_pin(pdev->config, 1);
     msi_init(pdev, 0, 1, true, false, errp);
 
+    if (pcie_endpoint_cap_init(pdev, 0x80) < 0) {
+        error_setg(errp, "hicain-vnic: failed to init PCIe endpoint capability");
+        return;
+    }
+    pcie_cap_fill_link_ep_usp(pdev, s->pcie_width, s->pcie_speed, false);
+
     memory_region_init_io(&s->mmio, OBJECT(s), &hicain_vnic_mmio_ops, s,
                           "hicain-vnic-mmio", HICAIN_MMIO_SIZE);
     pci_register_bar(pdev, 0, PCI_BASE_ADDRESS_SPACE_MEMORY, &s->mmio);
@@ -461,12 +488,17 @@ static void hicain_vnic_exit(PCIDevice *pdev)
         s->sock_fd = -1;
     }
 
+    pcie_cap_exit(pdev);
     msi_uninit(pdev);
 }
 
 static const Property hicain_vnic_properties[] = {
     DEFINE_PROP_STRING("socket_path", HicainVnicState, socket_path),
     DEFINE_PROP_MACADDR("mac", HicainVnicState, conf_mac),
+    DEFINE_PROP_PCIE_LINK_SPEED("x-speed", HicainVnicState,
+                                pcie_speed, PCIE_LINK_SPEED_32),
+    DEFINE_PROP_PCIE_LINK_WIDTH("x-width", HicainVnicState,
+                                pcie_width, PCIE_LINK_WIDTH_16),
 };
 
 static void hicain_vnic_class_init(ObjectClass *klass, const void *data)

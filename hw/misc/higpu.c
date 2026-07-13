@@ -18,7 +18,10 @@
 #include "qemu/units.h"
 #include "hw/pci/pci.h"
 #include "hw/pci/msi.h"
+#include "hw/pci/pcie.h"
+#include "qapi/error.h"
 #include "hw/core/qdev-properties.h"
+#include "hw/core/qdev-properties-system.h"
 #include "qom/object.h"
 
 #include <errno.h>
@@ -31,8 +34,18 @@
 typedef struct HigpuState HigpuState;
 DECLARE_INSTANCE_CHECKER(HigpuState, HIGPU, TYPE_HICAIN_HIGPU)
 
-#define HICAIN_VENDOR_ID    0x1ED5
-#define HIGPU_DEVICE_ID     0xCA20
+/*
+ * PCI identity.
+ *
+ * EXPERIMENTAL IDs. higpu is a purely emulated device, so it uses the Red Hat
+ * / Qumranet vendor ID (0x1af4) with a device ID from the range
+ * 1af4:10f0-10ff that QEMU reserves for experimental use without registration
+ * (see docs/specs/pci-ids.rst). These MUST be replaced with an officially
+ * assigned 1b36 device ID (contact the QEMU PCI ID maintainer) before this
+ * device is submitted upstream or shipped in a product.
+ */
+#define HICAIN_VENDOR_ID    PCI_VENDOR_ID_REDHAT_QUMRANET
+#define HIGPU_DEVICE_ID     0x10F1
 
 #define HIGPU_BAR0_SIZE     (64 * KiB)
 #define HIGPU_BAR1_SIZE_DEFAULT  (256 * MiB)
@@ -84,6 +97,15 @@ struct HigpuState {
     uint32_t lanes_per_sm;
     uint32_t tensor_size;
     uint64_t devmem_size;
+
+    /*
+     * Advertised PCI Express link, surfaced through the Link Capabilities
+     * register so lspci -vv reports a realistic generation and width for a
+     * modern accelerator. The link is not simulated; the values exist for
+     * enumeration and teaching fidelity. Defaults are Gen5 x16.
+     */
+    PCIExpLinkSpeed pcie_speed;
+    PCIExpLinkWidth pcie_width;
 
     uint32_t irq_status;
     uint32_t irq_mask;
@@ -397,6 +419,12 @@ static void higpu_realize(PCIDevice *pdev, Error **errp)
     pci_config_set_interrupt_pin(pdev->config, 1);
     msi_init(pdev, 0, 1, true, false, errp);
 
+    if (pcie_endpoint_cap_init(pdev, 0x80) < 0) {
+        error_setg(errp, "higpu: failed to init PCIe endpoint capability");
+        return;
+    }
+    pcie_cap_fill_link_ep_usp(pdev, s->pcie_width, s->pcie_speed, false);
+
     memory_region_init_io(&s->bar0, OBJECT(s), &higpu_bar0_ops, s,
                           "higpu-bar0", HIGPU_BAR0_SIZE);
     pci_register_bar(pdev, 0, PCI_BASE_ADDRESS_SPACE_MEMORY, &s->bar0);
@@ -424,6 +452,7 @@ static void higpu_exit(PCIDevice *pdev)
 {
     HigpuState *s = HIGPU(pdev);
     higpu_link_disconnect(s);
+    pcie_cap_exit(pdev);
     msi_uninit(pdev);
 }
 
@@ -435,6 +464,10 @@ static const Property higpu_properties[] = {
     DEFINE_PROP_UINT64("devmem_size", HigpuState, devmem_size,
                        HIGPU_BAR1_SIZE_DEFAULT),
     DEFINE_PROP_STRING("hilink_socket", HigpuState, hilink_socket),
+    DEFINE_PROP_PCIE_LINK_SPEED("x-speed", HigpuState,
+                                pcie_speed, PCIE_LINK_SPEED_32),
+    DEFINE_PROP_PCIE_LINK_WIDTH("x-width", HigpuState,
+                                pcie_width, PCIE_LINK_WIDTH_16),
 };
 
 static void higpu_class_init(ObjectClass *klass, const void *data)
