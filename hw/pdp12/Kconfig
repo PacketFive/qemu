@@ -1,0 +1,8 @@
+config PDP12_VIRT
+    bool
+    default y
+    depends on PDP12
+    select SERIAL
+    select SERIAL_MM
+    select VIRTIO_MMIO
+    select DEVICE_TREE

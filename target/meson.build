@@ -17,3 +17,5 @@ subdir('sh4')
 subdir('sparc')
 subdir('tricore')
 subdir('xtensa')
+subdir('pdp12')
+
