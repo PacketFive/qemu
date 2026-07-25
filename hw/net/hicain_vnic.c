@@ -1,5 +1,5 @@
 /*
- * HiCAIN RoCE-IB-vNIC — Educational RDMA virtual NIC for Project HiCAIN
+ * HiCAIN RoCE-IB-vNIC - Educational RDMA virtual NIC for Project HiCAIN
  *
  * Copyright (c) 2026 PacketFive / Project HiCAIN
  *
