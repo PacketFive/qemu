@@ -713,6 +713,13 @@ static void aspeed_gpio_write_index_mode(void *opaque, hwaddr offset,
         reg_value = (reg_value | ~props->input) & props->output;
         set->direction = update_value_control_source(set, set->direction,
                                                      reg_value);
+        /*
+         * A pin that has just become an output starts driving the value in
+         * the data register. Firmware routinely writes the value first and
+         * flips the direction second, so without this the first assertion
+         * after a direction change is lost.
+         */
+        aspeed_gpio_update(s, set, set->data_read, set->direction);
         break;
     case gpio_reg_idx_interrupt:
         reg_value = set->int_enable;
@@ -867,6 +874,8 @@ static void aspeed_gpio_write(void *opaque, hwaddr offset, uint64_t data,
          */
         data = (data | ~props->input) & props->output;
         set->direction = update_value_control_source(set, set->direction, data);
+        /* See the comment in aspeed_gpio_write_index_mode(). */
+        aspeed_gpio_update(s, set, set->data_read, set->direction);
         break;
     case gpio_reg_int_enable:
         set->int_enable = update_value_control_source(set, set->int_enable,
