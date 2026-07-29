@@ -42,6 +42,10 @@ config PCA954X
     bool
     select I2C
 
+config CMIS_MODULE
+    bool
+    select I2C
+
 config PMBUS
     bool
     select SMBUS
