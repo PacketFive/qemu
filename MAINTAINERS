@@ -3937,6 +3937,25 @@ F: include/hw/i2c/smbus_master.h
 F: include/hw/i2c/smbus_slave.h
 F: include/hw/i2c/smbus_eeprom.h
 
+CMIS optical module
+M: Weqaar Janjua <weqaar.janjua@gmail.com>
+S: Maintained
+F: hw/i2c/cmis_module.c
+F: docs/specs/cmis-module.rst
+F: tests/qtest/cmis-module-test.c
+
+HiCAIN virtual NIC
+M: Weqaar Janjua <weqaar.janjua@gmail.com>
+S: Maintained
+F: hw/net/hicain_vnic.c
+F: docs/specs/hicain-vnic.rst
+
+HiGPU virtual accelerator
+M: Weqaar Janjua <weqaar.janjua@gmail.com>
+S: Maintained
+F: hw/misc/higpu.c
+F: docs/specs/higpu.rst
+
 I3C
 M: Joe Komlodi <komlodi@google.com>
 M: Cédric Le Goater <clg@kaod.org>

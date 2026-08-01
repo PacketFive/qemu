@@ -158,6 +158,40 @@ static void test_set_input_pins(const void *data)
     g_assert_cmphex(value, ==, 0xffffffff);
 }
 
+static void test_output_on_direction_flip(const void *data)
+{
+    QTestState *s = (QTestState *)data;
+    const char path[] = "/machine/soc/gpio";
+    uint32_t value;
+
+    /*
+     * Firmware routinely stages the level it wants in the data register while
+     * a pin is still an input, and only then turns the pin into an output.
+     * The pin has to start driving the staged level as soon as the direction
+     * flips, otherwise the first assertion after a direction change is lost.
+     */
+    qtest_writel(s, AST2600_GPIO_BASE + GPIO_ABCD_DIRECTION, 0x00000000);
+    qtest_qom_set_bool(s, path, "gpioA0", false);
+    g_assert(!qtest_qom_get_bool(s, path, "gpioA0"));
+
+    /* Staged while still an input: the pin must not move yet. */
+    qtest_writel(s, AST2600_GPIO_BASE + GPIO_ABCD_DATA_VALUE, 0x00000001);
+    g_assert(!qtest_qom_get_bool(s, path, "gpioA0"));
+
+    /* Now it becomes an output, and must drive what was staged. */
+    qtest_writel(s, AST2600_GPIO_BASE + GPIO_ABCD_DIRECTION, 0x00000001);
+    g_assert(qtest_qom_get_bool(s, path, "gpioA0"));
+
+    value = qtest_readl(s, AST2600_GPIO_BASE + GPIO_ABCD_DATA_VALUE);
+    g_assert_cmphex(value & 0x1, ==, 0x1);
+
+    /* The same has to hold for a staged low. */
+    qtest_writel(s, AST2600_GPIO_BASE + GPIO_ABCD_DIRECTION, 0x00000000);
+    qtest_writel(s, AST2600_GPIO_BASE + GPIO_ABCD_DATA_VALUE, 0x00000000);
+    qtest_writel(s, AST2600_GPIO_BASE + GPIO_ABCD_DIRECTION, 0x00000001);
+    g_assert(!qtest_qom_get_bool(s, path, "gpioA0"));
+}
+
 int main(int argc, char **argv)
 {
     QTestState *s;
@@ -169,6 +203,8 @@ int main(int argc, char **argv)
     qtest_add_data_func("/ast2600/gpio/set_colocated_pins", s,
                         test_set_colocated_pins);
     qtest_add_data_func("/ast2600/gpio/set_input_pins", s, test_set_input_pins);
+    qtest_add_data_func("/ast2600/gpio/output_on_direction_flip", s,
+                        test_output_on_direction_flip);
     r = g_test_run();
     qtest_quit(s);
 

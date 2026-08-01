@@ -39,4 +39,7 @@ guest hardware that is specific to QEMU.
    riscv-iommu
    riscv-aia
    aspeed-intc
+   cmis-module
+   hicain-vnic
+   higpu
    iommu-testdev

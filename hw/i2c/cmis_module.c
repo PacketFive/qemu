@@ -49,7 +49,10 @@ OBJECT_DECLARE_SIMPLE_TYPE(CmisModuleState, CMIS_MODULE)
 #define CMIS_REG_BANK_SELECT    126
 #define CMIS_REG_PAGE_SELECT    127
 
-/* Upper page 00h, module identity. Offsets are absolute, as CMIS states them. */
+/*
+ * Upper page 00h, module identity. Offsets are absolute, as CMIS
+ * states them.
+ */
 #define CMIS_REG_VENDOR_NAME    129 /* 16 ASCII, space padded */
 #define CMIS_REG_VENDOR_OUI     145 /* 3 bytes */
 #define CMIS_REG_VENDOR_PN      148 /* 16 ASCII */
@@ -67,7 +70,8 @@ OBJECT_DECLARE_SIMPLE_TYPE(CmisModuleState, CMIS_MODULE)
 #define CMIS_REG_RX_POWER       170 /* 8 x uint16, 0.1 uW */
 
 /* Upper page 02h, thresholds. */
-#define CMIS_REG_TEMP_THRESH    128 /* high alarm, low alarm, high warn, low warn */
+/* Each threshold set is high alarm, low alarm, high warning, low warning. */
+#define CMIS_REG_TEMP_THRESH    128
 #define CMIS_REG_VOLT_THRESH    136
 
 #define CMIS_PAGE_ID_00         0x00
@@ -174,8 +178,10 @@ static bool cmis_lane_enabled(CmisModuleState *s, unsigned lane)
     if (lane >= s->lanes) {
         return false;
     }
-    /* TxDisable is per lane, one bit each, and is the only control that
-     * changes what the diagnostics report. */
+    /*
+     * TxDisable is per lane, one bit each, and is the only control that
+     * changes what the diagnostics report.
+     */
     return !(s->page10[CMIS_REG_TX_DISABLE - CMIS_PAGE_SIZE] & (1u << lane));
 }
 
