@@ -3690,6 +3690,7 @@ if have_system
     'hw/nvram',
     'hw/pci',
     'hw/pci-host',
+    'hw/pdp12',
     'hw/ppc',
     'hw/rtc',
     'hw/riscv',

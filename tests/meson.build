@@ -88,3 +88,35 @@ subdir('qapi-schema')
 subdir('qtest')
 subdir('migration-stress')
 subdir('functional')
+
+# PDP-12 (PDP-V) target tests. Each script drives qemu-system-pdp12 over QMP
+# and checks architectural state against the reference emulator or the
+# normative profiles.
+if 'pdp12-softmmu' in target_dirs
+  pdp12_emulator = emulators['qemu-system-pdp12']
+  pdp12_node = find_program('node', required: false)
+  pdp12_tests = {
+    'pdp12-differential-test.py': 600,
+    'pdp12-scalar-test.py': 600,
+    'pdp12-atomic-test.py': 600,
+    'pdp12-privileged-test.py': 600,
+    'pdp12-p39-test.py': 600,
+    'pdp12-direct-kernel-smoke.py': 180,
+    'pdp12-boot-rom-smoke.py': 120,
+  }
+  if pdp12_node.found()
+    # The linked-head smoke builds its kernel image with the Node reference
+    # emulator's linker.
+    pdp12_tests += {'pdp12-linux-head-smoke.py': 300}
+  endif
+  foreach script, seconds : pdp12_tests
+    test(script.split('.')[0],
+         python,
+         args: [meson.current_source_dir() / script,
+                pdp12_emulator.full_path()],
+         depends: [pdp12_emulator],
+         timeout: seconds,
+         priority: seconds,
+         suite: ['pdp12'])
+  endforeach
+endif

@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-/* QEMU PDP-12 Neural Processing Unit (NPU) Mock Stub.
-   Copyright (C) 2026 QEMU authors.
-   Contributed by Weqaar Janjua. */
+/*
+ * QEMU PDP-12 Neural Processing Unit (NPU) Mock Stub.
+ * Copyright (C) 2026 QEMU authors.
+ * Contributed by Weqaar Janjua.
+ */
 
 #include "qemu/osdep.h"
 #include "hw/sysbus.h"
@@ -19,7 +21,8 @@ typedef struct PDP12NPUState {
     qemu_irq irq;
 } PDP12NPUState;
 
-static void pdp12_npu_write(void *opaque, hwaddr offset, uint64_t val, unsigned size)
+static void pdp12_npu_write(void *opaque, hwaddr offset, uint64_t val,
+                            unsigned size)
 {
     PDP12NPUState *s = PDP12_NPU(opaque);
     switch (offset) {
@@ -28,8 +31,13 @@ static void pdp12_npu_write(void *opaque, hwaddr offset, uint64_t val, unsigned 
         if (val > 0) {
             s->status |= 1; /* set busy */
             s->status &= ~1; /* immediately clear busy */
-            qemu_set_irq(s->irq, 1); /* trigger NPU interrupt */
         }
+        /*
+         * The platform wires this as a level-high XIC source.  A zero
+         * doorbell is therefore also the device acknowledgement and
+         * deasserts the source before XIC completion.
+         */
+        qemu_set_irq(s->irq, val > 0);
         break;
     default:
         break;
@@ -55,18 +63,30 @@ static const MemoryRegionOps pdp12_npu_ops = {
     .endianness = DEVICE_LITTLE_ENDIAN,
 };
 
+static void pdp12_npu_reset(DeviceState *dev)
+{
+    PDP12NPUState *s = PDP12_NPU(dev);
+
+    s->status = 0;
+    s->doorbell = 0;
+    qemu_set_irq(s->irq, 0);
+}
+
 static void pdp12_npu_realize(DeviceState *dev, Error **errp)
 {
     PDP12NPUState *s = PDP12_NPU(dev);
     sysbus_init_irq(SYS_BUS_DEVICE(dev), &s->irq);
-    memory_region_init_io(&s->mmio, OBJECT(s), &pdp12_npu_ops, s, "pdp12.npu", 0x1000);
+    memory_region_init_io(&s->mmio, OBJECT(s), &pdp12_npu_ops, s,
+                          "pdp12.npu", 0x1000);
     sysbus_init_mmio(SYS_BUS_DEVICE(dev), &s->mmio);
 }
 
 static void pdp12_npu_class_init(ObjectClass *klass, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
+
     dc->realize = pdp12_npu_realize;
+    device_class_set_legacy_reset(dc, pdp12_npu_reset);
 }
 
 static const TypeInfo pdp12_npu_info = {

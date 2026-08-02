@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
+# pdp12-virt.c
+pdp12_virt_direct_kernel_loaded(uint64_t entry, int64_t kernel_size, uint64_t fdt, uint32_t fdt_size, uint64_t handoff, uint64_t flags) "entry=0x%" PRIx64 " kernel_size=%" PRId64 " fdt=0x%" PRIx64 " fdt_size=%" PRIu32 " handoff=0x%" PRIx64 " flags=0x%" PRIx64
+pdp12_virt_direct_kernel_reset(uint64_t pc, uint64_t a0, uint64_t a1, uint64_t a2, uint64_t pstatus, uint64_t satp) "pc=0x%" PRIx64 " a0=0x%" PRIx64 " a1=0x%" PRIx64 " a2=0x%" PRIx64 " pstatus=0x%" PRIx64 " satp=0x%" PRIx64
+pdp12_virt_boot_rom_installed(uint64_t base, uint64_t size, size_t stub_size) "base=0x%" PRIx64 " size=0x%" PRIx64 " stub_size=%zu"
+pdp12_virt_boot_rom_reset(uint64_t pc) "pc=0x%" PRIx64

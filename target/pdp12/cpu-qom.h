@@ -10,6 +10,7 @@
 
 typedef struct PDP12CPUClass {
     CPUClass parent_class;
+    DeviceRealize parent_realize;
 } PDP12CPUClass;
 
 OBJECT_DECLARE_CPU_TYPE(PDP12CPU, PDP12CPUClass, PDP12_CPU)

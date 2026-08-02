@@ -4,6 +4,7 @@ pdp12_common_system_ss = ss.source_set()
 
 pdp12_ss.add(files(
   'cpu.c',
+  'helper.c',
   'translate.c',
   'mmu.c',
 ))

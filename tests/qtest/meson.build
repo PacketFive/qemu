@@ -160,6 +160,8 @@ qtests_microblaze = ['boot-serial-test'] + \
 
 qtests_microblazeel = qtests_microblaze
 
+qtests_pdp12 = ['pdp12-platform-control-test', 'pdp12-xic-test']
+
 qtests_mips = \
   qtests_filter + \
   (config_all_devices.has_key('CONFIG_ISA_TESTDEV') ? ['endianness-test'] : []) +            \
