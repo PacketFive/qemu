@@ -1,8 +1,8 @@
 =========================
-HiCAIN virtual NIC
+Cnuas virtual NIC
 =========================
 
-``hicain-vnic`` is a PCIe network device whose wire side is a UNIX socket
+``cnuas-vnic`` is a PCIe network device whose wire side is a UNIX socket
 rather than a QEMU netdev. It exists to let a virtual fabric be built out of
 ordinary processes: each guest's NIC connects to a switch model listening on
 a socket, so a multi-node RDMA or Ethernet topology can be assembled, torn

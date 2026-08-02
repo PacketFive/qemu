@@ -3944,17 +3944,17 @@ F: hw/i2c/cmis_module.c
 F: docs/specs/cmis-module.rst
 F: tests/qtest/cmis-module-test.c
 
-HiCAIN virtual NIC
+Cnuas virtual NIC
 M: Weqaar Janjua <weqaar.janjua@gmail.com>
 S: Maintained
-F: hw/net/hicain_vnic.c
-F: docs/specs/hicain-vnic.rst
+F: hw/net/cnuas_vnic.c
+F: docs/specs/cnuas-vnic.rst
 
-HiGPU virtual accelerator
+CnuasGPU virtual accelerator
 M: Weqaar Janjua <weqaar.janjua@gmail.com>
 S: Maintained
-F: hw/misc/higpu.c
-F: docs/specs/higpu.rst
+F: hw/misc/cnuasgpu.c
+F: docs/specs/cnuasgpu.rst
 
 I3C
 M: Joe Komlodi <komlodi@google.com>

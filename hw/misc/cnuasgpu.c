@@ -1,12 +1,12 @@
 /*
- * HiCAIN HiGPU - Virtual GPU PCIe device for QEMU.
+ * CnuasGPU - Virtual GPU PCIe device for QEMU.
  *
  * Phase 1: PCI identifiers, BAR0 (control MMIO), BAR1 (device memory),
  *          MSI.
- * Phase 2 (HiLink): optional SOCK_SEQPACKET connection to
- *          higpu-link-switchd. When enabled, BAR0 exposes TX/RX
+ * Phase 2 (CnuasLink): optional SOCK_SEQPACKET connection to
+ *          cnuasgpu-link-switchd. When enabled, BAR0 exposes TX/RX
  *          rings (single-frame for v1) and the device forwards
- *          HiLink frames between BAR1 and the switch.
+ *          CnuasLink frames between BAR1 and the switch.
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
@@ -30,26 +30,26 @@
 #include <sys/un.h>
 #include <unistd.h>
 
-#define TYPE_HICAIN_HIGPU "higpu"
-typedef struct HigpuState HigpuState;
-DECLARE_INSTANCE_CHECKER(HigpuState, HIGPU, TYPE_HICAIN_HIGPU)
+#define TYPE_CNUAS_CNUASGPU "cnuasgpu"
+typedef struct CnuasGpuState CnuasGpuState;
+DECLARE_INSTANCE_CHECKER(CnuasGpuState, CNUASGPU, TYPE_CNUAS_CNUASGPU)
 
 /*
  * PCI identity.
  *
- * EXPERIMENTAL IDs. higpu is a purely emulated device, so it uses the Red Hat
+ * EXPERIMENTAL IDs. cnuasgpu is a purely emulated device, so it uses the Red Hat
  * / Qumranet vendor ID (0x1af4) with a device ID from the range
  * 1af4:10f0-10ff that QEMU reserves for experimental use without registration
  * (see docs/specs/pci-ids.rst). These MUST be replaced with an officially
  * assigned 1b36 device ID (contact the QEMU PCI ID maintainer) before this
  * device is submitted upstream or shipped in a product.
  */
-#define HICAIN_VENDOR_ID    PCI_VENDOR_ID_REDHAT_QUMRANET
-#define HIGPU_DEVICE_ID     0x10F1
+#define CNUAS_VENDOR_ID    PCI_VENDOR_ID_REDHAT_QUMRANET
+#define CNUASGPU_DEVICE_ID     0x10F1
 
-#define HIGPU_BAR0_SIZE     (64 * KiB)
-#define HIGPU_BAR1_SIZE_DEFAULT  (256 * MiB)
-#define HIGPU_LINK_MAX_FRAME (64u * 1024u)
+#define CNUASGPU_BAR0_SIZE     (64 * KiB)
+#define CNUASGPU_BAR1_SIZE_DEFAULT  (256 * MiB)
+#define CNUASGPU_LINK_MAX_FRAME (64u * 1024u)
 
 #define REG_VENDOR_ID       0x000
 #define REG_DEVICE_ID       0x004
@@ -64,7 +64,7 @@ DECLARE_INSTANCE_CHECKER(HigpuState, HIGPU, TYPE_HICAIN_HIGPU)
 #define REG_IRQ_STATUS      0x100
 #define REG_IRQ_MASK        0x104
 
-/* HiLink ring registers */
+/* CnuasLink ring registers */
 #define REG_LINK_STATUS         0x200  /* RO: bit0=link_up, bit1=rx_ready */
 #define REG_LINK_TX_OFFSET_LO   0x204  /* RW: BAR1 offset of TX frame */
 #define REG_LINK_TX_OFFSET_HI   0x208
@@ -76,8 +76,8 @@ DECLARE_INSTANCE_CHECKER(HigpuState, HIGPU, TYPE_HICAIN_HIGPU)
 #define REG_LINK_RX_LEN         0x220  /* RO: bytes of last received frame */
 #define REG_LINK_RX_CONSUME     0x224  /* WO: write 1 after reading RX_LEN */
 
-#define HIGPU_FW_VERSION    0x00010000   /* 0.1.0 */
-#define HIGPU_REVISION      0x01
+#define CNUASGPU_FW_VERSION    0x00010000   /* 0.1.0 */
+#define CNUASGPU_REVISION      0x01
 
 /* IRQ status bits */
 #define IRQ_LINK_TX_DONE    (1u << 0)
@@ -87,7 +87,7 @@ DECLARE_INSTANCE_CHECKER(HigpuState, HIGPU, TYPE_HICAIN_HIGPU)
 #define LINK_STATUS_UP        (1u << 0)
 #define LINK_STATUS_RX_READY  (1u << 1)
 
-struct HigpuState {
+struct CnuasGpuState {
     PCIDevice pdev;
     MemoryRegion bar0;
     MemoryRegion bar1;
@@ -110,8 +110,8 @@ struct HigpuState {
     uint32_t irq_status;
     uint32_t irq_mask;
 
-    /* HiLink */
-    char    *hilink_socket;
+    /* CnuasLink */
+    char    *cnuaslink_socket;
     int      sock_fd;
     bool     link_up;
 
@@ -126,7 +126,7 @@ struct HigpuState {
     bool     link_rx_ready;
 };
 
-static void higpu_update_irq(HigpuState *s)
+static void cnuasgpu_update_irq(CnuasGpuState *s)
 {
     uint32_t pending = s->irq_status & s->irq_mask;
 
@@ -144,7 +144,7 @@ static void higpu_update_irq(HigpuState *s)
  * MemoryRegion's host pointer for direct reads/writes from the QEMU
  * thread. Bound checks use s->devmem_size.
  */
-static void *higpu_bar1_ptr(HigpuState *s, uint64_t off, size_t len)
+static void *cnuasgpu_bar1_ptr(CnuasGpuState *s, uint64_t off, size_t len)
 {
     if (off > s->devmem_size || len > s->devmem_size ||
         off + len > s->devmem_size) {
@@ -153,7 +153,7 @@ static void *higpu_bar1_ptr(HigpuState *s, uint64_t off, size_t len)
     return (uint8_t *)memory_region_get_ram_ptr(&s->bar1) + off;
 }
 
-static void higpu_link_disconnect(HigpuState *s)
+static void cnuasgpu_link_disconnect(CnuasGpuState *s)
 {
     if (s->sock_fd >= 0) {
         qemu_set_fd_handler(s->sock_fd, NULL, NULL, NULL);
@@ -164,10 +164,10 @@ static void higpu_link_disconnect(HigpuState *s)
     s->link_rx_ready = false;
 }
 
-static void higpu_link_rx_ready(void *opaque)
+static void cnuasgpu_link_rx_ready(void *opaque)
 {
-    HigpuState *s = opaque;
-    uint8_t buf[HIGPU_LINK_MAX_FRAME];
+    CnuasGpuState *s = opaque;
+    uint8_t buf[CNUASGPU_LINK_MAX_FRAME];
 
     if (s->link_rx_ready) {
         /* Guest hasn't drained previous frame yet. Pause RX. */
@@ -178,8 +178,8 @@ static void higpu_link_rx_ready(void *opaque)
     ssize_t n = recv(s->sock_fd, buf, sizeof(buf), MSG_DONTWAIT);
     if (n == 0) {
         qemu_log_mask(LOG_GUEST_ERROR,
-                      "higpu/hilink: peer closed socket\n");
-        higpu_link_disconnect(s);
+                      "cnuasgpu/cnuaslink: peer closed socket\n");
+        cnuasgpu_link_disconnect(s);
         return;
     }
     if (n < 0) {
@@ -187,8 +187,8 @@ static void higpu_link_rx_ready(void *opaque)
             return;
         }
         qemu_log_mask(LOG_GUEST_ERROR,
-                      "higpu/hilink: recv failed: %s\n", strerror(errno));
-        higpu_link_disconnect(s);
+                      "cnuasgpu/cnuaslink: recv failed: %s\n", strerror(errno));
+        cnuasgpu_link_disconnect(s);
         return;
     }
 
@@ -199,15 +199,15 @@ static void higpu_link_rx_ready(void *opaque)
         /* Guest hasn't posted a buffer yet, or buffer too small.
          * For v1 we just drop. */
         qemu_log_mask(LOG_GUEST_ERROR,
-                      "higpu/hilink: dropped RX frame (%zd bytes, "
+                      "cnuasgpu/cnuaslink: dropped RX frame (%zd bytes, "
                       "guest buf=%u)\n", n, cap);
         return;
     }
 
-    void *dst = higpu_bar1_ptr(s, off, (size_t)n);
+    void *dst = cnuasgpu_bar1_ptr(s, off, (size_t)n);
     if (!dst) {
         qemu_log_mask(LOG_GUEST_ERROR,
-                      "higpu/hilink: RX offset 0x%" PRIx64 " + %zd "
+                      "cnuasgpu/cnuaslink: RX offset 0x%" PRIx64 " + %zd "
                       "exceeds BAR1\n", off, n);
         return;
     }
@@ -216,63 +216,63 @@ static void higpu_link_rx_ready(void *opaque)
     s->link_rx_len = (uint32_t)n;
     s->link_rx_ready = true;
     s->irq_status |= IRQ_LINK_RX_AVAIL;
-    higpu_update_irq(s);
+    cnuasgpu_update_irq(s);
 }
 
-static int higpu_link_connect(HigpuState *s)
+static int cnuasgpu_link_connect(CnuasGpuState *s)
 {
-    if (!s->hilink_socket || s->hilink_socket[0] == '\0') {
+    if (!s->cnuaslink_socket || s->cnuaslink_socket[0] == '\0') {
         return 0;
     }
 
     int fd = socket(AF_UNIX, SOCK_SEQPACKET, 0);
     if (fd < 0) {
         qemu_log_mask(LOG_GUEST_ERROR,
-                      "higpu/hilink: socket() failed: %s\n",
+                      "cnuasgpu/cnuaslink: socket() failed: %s\n",
                       strerror(errno));
         return -1;
     }
 
     struct sockaddr_un addr = { .sun_family = AF_UNIX };
-    if (strlen(s->hilink_socket) >= sizeof(addr.sun_path)) {
+    if (strlen(s->cnuaslink_socket) >= sizeof(addr.sun_path)) {
         qemu_log_mask(LOG_GUEST_ERROR,
-                      "higpu/hilink: socket path too long: %s\n",
-                      s->hilink_socket);
+                      "cnuasgpu/cnuaslink: socket path too long: %s\n",
+                      s->cnuaslink_socket);
         close(fd);
         return -1;
     }
-    strcpy(addr.sun_path, s->hilink_socket);
+    strcpy(addr.sun_path, s->cnuaslink_socket);
 
     if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
         qemu_log_mask(LOG_GUEST_ERROR,
-                      "higpu/hilink: connect(%s) failed: %s\n",
-                      s->hilink_socket, strerror(errno));
+                      "cnuasgpu/cnuaslink: connect(%s) failed: %s\n",
+                      s->cnuaslink_socket, strerror(errno));
         close(fd);
         return -1;
     }
 
     s->sock_fd = fd;
     s->link_up = true;
-    qemu_set_fd_handler(fd, higpu_link_rx_ready, NULL, s);
+    qemu_set_fd_handler(fd, cnuasgpu_link_rx_ready, NULL, s);
     return 0;
 }
 
-static void higpu_link_doorbell(HigpuState *s)
+static void cnuasgpu_link_doorbell(CnuasGpuState *s)
 {
     if (!s->link_up || s->sock_fd < 0) {
         return;
     }
     uint64_t off = ((uint64_t)s->link_tx_off_hi << 32) | s->link_tx_off_lo;
     uint32_t len = s->link_tx_len;
-    if (len == 0 || len > HIGPU_LINK_MAX_FRAME) {
+    if (len == 0 || len > CNUASGPU_LINK_MAX_FRAME) {
         qemu_log_mask(LOG_GUEST_ERROR,
-                      "higpu/hilink: TX bad length %u\n", len);
+                      "cnuasgpu/cnuaslink: TX bad length %u\n", len);
         return;
     }
-    void *src = higpu_bar1_ptr(s, off, len);
+    void *src = cnuasgpu_bar1_ptr(s, off, len);
     if (!src) {
         qemu_log_mask(LOG_GUEST_ERROR,
-                      "higpu/hilink: TX offset 0x%" PRIx64 " + %u "
+                      "cnuasgpu/cnuaslink: TX offset 0x%" PRIx64 " + %u "
                       "exceeds BAR1\n", off, len);
         return;
     }
@@ -280,28 +280,28 @@ static void higpu_link_doorbell(HigpuState *s)
     ssize_t n = send(s->sock_fd, src, len, MSG_NOSIGNAL);
     if (n < 0) {
         qemu_log_mask(LOG_GUEST_ERROR,
-                      "higpu/hilink: send failed: %s\n", strerror(errno));
-        higpu_link_disconnect(s);
+                      "cnuasgpu/cnuaslink: send failed: %s\n", strerror(errno));
+        cnuasgpu_link_disconnect(s);
         return;
     }
 
     s->irq_status |= IRQ_LINK_TX_DONE;
-    higpu_update_irq(s);
+    cnuasgpu_update_irq(s);
 }
 
-static uint64_t higpu_bar0_read(void *opaque, hwaddr addr, unsigned size)
+static uint64_t cnuasgpu_bar0_read(void *opaque, hwaddr addr, unsigned size)
 {
-    HigpuState *s = opaque;
+    CnuasGpuState *s = opaque;
 
     switch (addr) {
     case REG_VENDOR_ID:
-        return HICAIN_VENDOR_ID;
+        return CNUAS_VENDOR_ID;
     case REG_DEVICE_ID:
-        return HIGPU_DEVICE_ID;
+        return CNUASGPU_DEVICE_ID;
     case REG_REVISION:
-        return HIGPU_REVISION;
+        return CNUASGPU_REVISION;
     case REG_FW_VERSION:
-        return HIGPU_FW_VERSION;
+        return CNUASGPU_FW_VERSION;
     case REG_GPU_ID:
         return s->gpu_id;
     case REG_SM_COUNT:
@@ -337,25 +337,25 @@ static uint64_t higpu_bar0_read(void *opaque, hwaddr addr, unsigned size)
         return s->link_rx_len;
     default:
         qemu_log_mask(LOG_GUEST_ERROR,
-                      "higpu: read from unknown reg 0x%" HWADDR_PRIx "\n",
+                      "cnuasgpu: read from unknown reg 0x%" HWADDR_PRIx "\n",
                       addr);
         return 0;
     }
 }
 
-static void higpu_bar0_write(void *opaque, hwaddr addr,
+static void cnuasgpu_bar0_write(void *opaque, hwaddr addr,
                              uint64_t val, unsigned size)
 {
-    HigpuState *s = opaque;
+    CnuasGpuState *s = opaque;
 
     switch (addr) {
     case REG_IRQ_STATUS:
         s->irq_status &= ~val;
-        higpu_update_irq(s);
+        cnuasgpu_update_irq(s);
         break;
     case REG_IRQ_MASK:
         s->irq_mask = val;
-        higpu_update_irq(s);
+        cnuasgpu_update_irq(s);
         break;
     case REG_LINK_TX_OFFSET_LO:
         s->link_tx_off_lo = (uint32_t)val;
@@ -368,7 +368,7 @@ static void higpu_bar0_write(void *opaque, hwaddr addr,
         break;
     case REG_LINK_TX_DOORBELL:
         if (val) {
-            higpu_link_doorbell(s);
+            cnuasgpu_link_doorbell(s);
         }
         break;
     case REG_LINK_RX_OFFSET_LO:
@@ -385,22 +385,22 @@ static void higpu_bar0_write(void *opaque, hwaddr addr,
             s->link_rx_ready = false;
             s->link_rx_len = 0;
             if (s->sock_fd >= 0 && s->link_up) {
-                qemu_set_fd_handler(s->sock_fd, higpu_link_rx_ready,
+                qemu_set_fd_handler(s->sock_fd, cnuasgpu_link_rx_ready,
                                     NULL, s);
             }
         }
         break;
     default:
         qemu_log_mask(LOG_GUEST_ERROR,
-                      "higpu: write to unknown reg 0x%" HWADDR_PRIx "\n",
+                      "cnuasgpu: write to unknown reg 0x%" HWADDR_PRIx "\n",
                       addr);
         break;
     }
 }
 
-static const MemoryRegionOps higpu_bar0_ops = {
-    .read = higpu_bar0_read,
-    .write = higpu_bar0_write,
+static const MemoryRegionOps cnuasgpu_bar0_ops = {
+    .read = cnuasgpu_bar0_read,
+    .write = cnuasgpu_bar0_write,
     .endianness = DEVICE_LITTLE_ENDIAN,
     .valid = {
         .min_access_size = 4,
@@ -412,24 +412,24 @@ static const MemoryRegionOps higpu_bar0_ops = {
     },
 };
 
-static void higpu_realize(PCIDevice *pdev, Error **errp)
+static void cnuasgpu_realize(PCIDevice *pdev, Error **errp)
 {
-    HigpuState *s = HIGPU(pdev);
+    CnuasGpuState *s = CNUASGPU(pdev);
 
     pci_config_set_interrupt_pin(pdev->config, 1);
     msi_init(pdev, 0, 1, true, false, errp);
 
     if (pcie_endpoint_cap_init(pdev, 0x80) < 0) {
-        error_setg(errp, "higpu: failed to init PCIe endpoint capability");
+        error_setg(errp, "cnuasgpu: failed to init PCIe endpoint capability");
         return;
     }
     pcie_cap_fill_link_ep_usp(pdev, s->pcie_width, s->pcie_speed, false);
 
-    memory_region_init_io(&s->bar0, OBJECT(s), &higpu_bar0_ops, s,
-                          "higpu-bar0", HIGPU_BAR0_SIZE);
+    memory_region_init_io(&s->bar0, OBJECT(s), &cnuasgpu_bar0_ops, s,
+                          "cnuasgpu-bar0", CNUASGPU_BAR0_SIZE);
     pci_register_bar(pdev, 0, PCI_BASE_ADDRESS_SPACE_MEMORY, &s->bar0);
 
-    memory_region_init_ram(&s->bar1, OBJECT(s), "higpu-devmem",
+    memory_region_init_ram(&s->bar1, OBJECT(s), "cnuasgpu-devmem",
                            s->devmem_size, errp);
     if (*errp) {
         return;
@@ -445,62 +445,62 @@ static void higpu_realize(PCIDevice *pdev, Error **errp)
     s->link_up = false;
     s->link_rx_ready = false;
 
-    higpu_link_connect(s);
+    cnuasgpu_link_connect(s);
 }
 
-static void higpu_exit(PCIDevice *pdev)
+static void cnuasgpu_exit(PCIDevice *pdev)
 {
-    HigpuState *s = HIGPU(pdev);
-    higpu_link_disconnect(s);
+    CnuasGpuState *s = CNUASGPU(pdev);
+    cnuasgpu_link_disconnect(s);
     pcie_cap_exit(pdev);
     msi_uninit(pdev);
 }
 
-static const Property higpu_properties[] = {
-    DEFINE_PROP_UINT32("gpu_id", HigpuState, gpu_id, 0),
-    DEFINE_PROP_UINT32("sm_count", HigpuState, sm_count, 16),
-    DEFINE_PROP_UINT32("lanes_per_sm", HigpuState, lanes_per_sm, 32),
-    DEFINE_PROP_UINT32("tensor_size", HigpuState, tensor_size, 16),
-    DEFINE_PROP_UINT64("devmem_size", HigpuState, devmem_size,
-                       HIGPU_BAR1_SIZE_DEFAULT),
-    DEFINE_PROP_STRING("hilink_socket", HigpuState, hilink_socket),
-    DEFINE_PROP_PCIE_LINK_SPEED("x-speed", HigpuState,
+static const Property cnuasgpu_properties[] = {
+    DEFINE_PROP_UINT32("gpu_id", CnuasGpuState, gpu_id, 0),
+    DEFINE_PROP_UINT32("sm_count", CnuasGpuState, sm_count, 16),
+    DEFINE_PROP_UINT32("lanes_per_sm", CnuasGpuState, lanes_per_sm, 32),
+    DEFINE_PROP_UINT32("tensor_size", CnuasGpuState, tensor_size, 16),
+    DEFINE_PROP_UINT64("devmem_size", CnuasGpuState, devmem_size,
+                       CNUASGPU_BAR1_SIZE_DEFAULT),
+    DEFINE_PROP_STRING("cnuaslink_socket", CnuasGpuState, cnuaslink_socket),
+    DEFINE_PROP_PCIE_LINK_SPEED("x-speed", CnuasGpuState,
                                 pcie_speed, PCIE_LINK_SPEED_32),
-    DEFINE_PROP_PCIE_LINK_WIDTH("x-width", HigpuState,
+    DEFINE_PROP_PCIE_LINK_WIDTH("x-width", CnuasGpuState,
                                 pcie_width, PCIE_LINK_WIDTH_16),
 };
 
-static void higpu_class_init(ObjectClass *klass, const void *data)
+static void cnuasgpu_class_init(ObjectClass *klass, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
     PCIDeviceClass *k = PCI_DEVICE_CLASS(klass);
 
-    k->realize = higpu_realize;
-    k->exit = higpu_exit;
-    k->vendor_id = HICAIN_VENDOR_ID;
-    k->device_id = HIGPU_DEVICE_ID;
+    k->realize = cnuasgpu_realize;
+    k->exit = cnuasgpu_exit;
+    k->vendor_id = CNUAS_VENDOR_ID;
+    k->device_id = CNUASGPU_DEVICE_ID;
     k->class_id = PCI_CLASS_PROCESSOR_CO;
-    k->revision = HIGPU_REVISION;
+    k->revision = CNUASGPU_REVISION;
 
     set_bit(DEVICE_CATEGORY_MISC, dc->categories);
-    dc->desc = "HiCAIN HiGPU (virtual GPU)";
-    device_class_set_props(dc, higpu_properties);
+    dc->desc = "CnuasGPU (virtual GPU)";
+    device_class_set_props(dc, cnuasgpu_properties);
 }
 
-static const TypeInfo higpu_info = {
-    .name          = TYPE_HICAIN_HIGPU,
+static const TypeInfo cnuasgpu_info = {
+    .name          = TYPE_CNUAS_CNUASGPU,
     .parent        = TYPE_PCI_DEVICE,
-    .instance_size = sizeof(HigpuState),
-    .class_init    = higpu_class_init,
+    .instance_size = sizeof(CnuasGpuState),
+    .class_init    = cnuasgpu_class_init,
     .interfaces    = (InterfaceInfo[]) {
         { INTERFACE_PCIE_DEVICE },
         { },
     },
 };
 
-static void higpu_register_types(void)
+static void cnuasgpu_register_types(void)
 {
-    type_register_static(&higpu_info);
+    type_register_static(&cnuasgpu_info);
 }
 
-type_init(higpu_register_types)
+type_init(cnuasgpu_register_types)

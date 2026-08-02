@@ -1,17 +1,17 @@
 =========================
-HiGPU virtual accelerator
+CnuasGPU virtual accelerator
 =========================
 
-``higpu`` is a PCIe accelerator model. It is not an emulation of any real
+``cnuasgpu`` is a PCIe accelerator model. It is not an emulation of any real
 GPU and executes no kernels; what it provides is the shape of one - an
 identification block, a large device-memory BAR, an interrupt path, and a
 peer-to-peer link. That is enough to develop and test the software that sits
 above an accelerator (runtimes, allocators, drivers, fabric managers) and to
 exercise multi-device collectives, without the silicon.
 
-The peer link, HiLink, is a UNIX socket carrying frames pulled straight out
+The peer link, CnuasLink, is a UNIX socket carrying frames pulled straight out
 of device memory. It models the direct device-to-device path that
-accelerators use for collectives, and lets a topology of several HiGPUs be
+accelerators use for collectives, and lets a topology of several CnuasGPUs be
 wired together as ordinary host processes.
 
 PCI properties
@@ -48,7 +48,7 @@ Options
 ``devmem_size``
   Size of BAR 1, default 256 MiB.
 
-``hilink_socket``
+``cnuaslink_socket``
   Path of the ``AF_UNIX`` ``SOCK_SEQPACKET`` socket for the peer link.
   Without it the device works normally but reports the link down.
 
@@ -89,11 +89,11 @@ Offset  Name                Meaning
 ===== ==================================================
 Bit   Meaning
 ===== ==================================================
-0     A HiLink transmit has completed
-1     A HiLink frame is available
+0     A CnuasLink transmit has completed
+1     A CnuasLink frame is available
 ===== ==================================================
 
-HiLink:
+CnuasLink:
 
 ======  ==================  =========================================
 Offset  Name                Meaning
@@ -111,7 +111,7 @@ Offset  Name                Meaning
 0x224   LINK_RX_CONSUME     Write non-zero once the frame is read
 ======  ==================  =========================================
 
-Sending over HiLink
+Sending over CnuasLink
 -------------------
 
 Write the offset and length of a buffer that lives in BAR 1, then write
@@ -127,7 +127,7 @@ If the link is down the doorbell does nothing at all - no frame, and no
 completion interrupt. Drivers must therefore check ``LINK_STATUS`` before
 sending rather than waiting on a completion that will not arrive.
 
-Receiving over HiLink
+Receiving over CnuasLink
 ---------------------
 
 Arm the receive path by writing ``LINK_RX_OFFSET_LO``, ``LINK_RX_OFFSET_HI``

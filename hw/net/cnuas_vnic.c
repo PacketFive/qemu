@@ -1,7 +1,7 @@
 /*
- * HiCAIN RoCE-IB-vNIC - Educational RDMA virtual NIC for Project HiCAIN
+ * Cnuas RoCE-IB-vNIC - Educational RDMA virtual NIC for Project Cnuas
  *
- * Copyright (c) 2026 PacketFive / Project HiCAIN
+ * Copyright (c) 2026 PacketFive / Project Cnuas
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -42,26 +42,26 @@
 #include <fcntl.h>
 #include <errno.h>
 
-#define TYPE_HICAIN_VNIC "hicain-vnic"
-typedef struct HicainVnicState HicainVnicState;
-DECLARE_INSTANCE_CHECKER(HicainVnicState, HICAIN_VNIC,
-                         TYPE_HICAIN_VNIC)
+#define TYPE_CNUAS_VNIC "cnuas-vnic"
+typedef struct CnuasVnicState CnuasVnicState;
+DECLARE_INSTANCE_CHECKER(CnuasVnicState, CNUAS_VNIC,
+                         TYPE_CNUAS_VNIC)
 
 /*
  * PCI identity.
  *
- * EXPERIMENTAL IDs. hicain-vnic is a purely emulated device, so it uses the
+ * EXPERIMENTAL IDs. cnuas-vnic is a purely emulated device, so it uses the
  * Red Hat / Qumranet vendor ID (0x1af4) with a device ID from the range
  * 1af4:10f0-10ff that QEMU reserves for experimental use without
  * registration (see docs/specs/pci-ids.rst). These MUST be replaced with an
  * officially assigned 1b36 device ID (contact the QEMU PCI ID maintainer)
  * before this device is submitted upstream or shipped in a product.
  */
-#define HICAIN_VENDOR_ID     PCI_VENDOR_ID_REDHAT_QUMRANET
-#define HICAIN_DEVICE_ID     0x10F0
+#define CNUAS_VENDOR_ID     PCI_VENDOR_ID_REDHAT_QUMRANET
+#define CNUAS_DEVICE_ID     0x10F0
 
-#define HICAIN_MAX_FRAME     9216
-#define HICAIN_MMIO_SIZE     4096
+#define CNUAS_MAX_FRAME     9216
+#define CNUAS_MMIO_SIZE     4096
 
 #define REG_TX_ADDR_LO       0x00
 #define REG_TX_ADDR_HI       0x04
@@ -87,7 +87,7 @@ DECLARE_INSTANCE_CHECKER(HicainVnicState, HICAIN_VNIC,
 #define RX_STATUS_EMPTY      0x00
 #define RX_STATUS_READY      0x01
 
-struct HicainVnicState {
+struct CnuasVnicState {
     PCIDevice pdev;
     MemoryRegion mmio;
 
@@ -98,7 +98,7 @@ struct HicainVnicState {
      * MAC address.
      *
      * Exposed as a qdev property so each instance of -device
-     * hicain-vnic can be given a distinct address from the command
+     * cnuas-vnic can be given a distinct address from the command
      * line (mac=02:48:43:41:49:NN).  If not supplied the realize
      * callback falls back to a deterministic per-PCI-slot value so
      * we never default two VMs to the same address.
@@ -128,11 +128,11 @@ struct HicainVnicState {
     uint32_t irq_mask;
     uint32_t link_status;
 
-    uint8_t rx_buf[HICAIN_MAX_FRAME];
+    uint8_t rx_buf[CNUAS_MAX_FRAME];
     uint32_t rx_buf_len;
 };
 
-static void hicain_vnic_update_irq(HicainVnicState *s)
+static void cnuas_vnic_update_irq(CnuasVnicState *s)
 {
     uint32_t pending = s->irq_status & s->irq_mask;
 
@@ -145,18 +145,18 @@ static void hicain_vnic_update_irq(HicainVnicState *s)
     }
 }
 
-static void hicain_vnic_tx(HicainVnicState *s)
+static void cnuas_vnic_tx(CnuasVnicState *s)
 {
-    uint8_t buf[HICAIN_MAX_FRAME];
+    uint8_t buf[CNUAS_MAX_FRAME];
     uint64_t addr;
     uint32_t len;
 
     addr = ((uint64_t)s->tx_addr_hi << 32) | s->tx_addr_lo;
     len = s->tx_len;
 
-    if (len == 0 || len > HICAIN_MAX_FRAME) {
+    if (len == 0 || len > CNUAS_MAX_FRAME) {
         qemu_log_mask(LOG_GUEST_ERROR,
-                      "hicain-vnic: invalid TX len %u\n", len);
+                      "cnuas-vnic: invalid TX len %u\n", len);
         return;
     }
 
@@ -166,13 +166,13 @@ static void hicain_vnic_tx(HicainVnicState *s)
         ssize_t sent = send(s->sock_fd, buf, len, MSG_NOSIGNAL);
         if (sent < 0) {
             qemu_log_mask(LOG_GUEST_ERROR,
-                          "hicain-vnic: TX send failed: %s\n",
+                          "cnuas-vnic: TX send failed: %s\n",
                           strerror(errno));
         }
     }
 
     s->irq_status |= IRQ_TX_COMPLETE;
-    hicain_vnic_update_irq(s);
+    cnuas_vnic_update_irq(s);
 }
 
 /*
@@ -189,7 +189,7 @@ static void hicain_vnic_tx(HicainVnicState *s)
  * firing until the socket is drained, which gives the guest
  * back-pressure that matches a real NIC's RX ring full condition.
  */
-static bool hicain_vnic_drain_one_rx(HicainVnicState *s)
+static bool cnuas_vnic_drain_one_rx(CnuasVnicState *s)
 {
     ssize_t len;
     uint64_t addr;
@@ -205,7 +205,7 @@ static bool hicain_vnic_drain_one_rx(HicainVnicState *s)
         return false;
     }
 
-    len = recv(s->sock_fd, s->rx_buf, HICAIN_MAX_FRAME, MSG_DONTWAIT);
+    len = recv(s->sock_fd, s->rx_buf, CNUAS_MAX_FRAME, MSG_DONTWAIT);
     if (len <= 0) {
         return false;
     }
@@ -226,13 +226,13 @@ static bool hicain_vnic_drain_one_rx(HicainVnicState *s)
     s->rx_status = RX_STATUS_READY;
 
     s->irq_status |= IRQ_RX_COMPLETE;
-    hicain_vnic_update_irq(s);
+    cnuas_vnic_update_irq(s);
     return true;
 }
 
-static void hicain_vnic_rx_event(void *opaque)
+static void cnuas_vnic_rx_event(void *opaque)
 {
-    HicainVnicState *s = opaque;
+    CnuasVnicState *s = opaque;
 
     /*
      * The fd handler is level-triggered: if we don't drain or stop
@@ -241,22 +241,22 @@ static void hicain_vnic_rx_event(void *opaque)
      * (capacity == 1) and let the next select(2) wake-up arrive
      * after the guest acks REG_RX_STATUS.
      */
-    hicain_vnic_drain_one_rx(s);
+    cnuas_vnic_drain_one_rx(s);
 }
 
 /* Kept for backwards compat with the polled callsite in
- * hicain_vnic_mmio_read(REG_RX_STATUS).  The event-driven path
+ * cnuas_vnic_mmio_read(REG_RX_STATUS).  The event-driven path
  * above is the canonical one.
  */
-static void hicain_vnic_check_rx(HicainVnicState *s)
+static void cnuas_vnic_check_rx(CnuasVnicState *s)
 {
-    hicain_vnic_drain_one_rx(s);
+    cnuas_vnic_drain_one_rx(s);
 }
 
-static uint64_t hicain_vnic_mmio_read(void *opaque, hwaddr addr,
+static uint64_t cnuas_vnic_mmio_read(void *opaque, hwaddr addr,
                                        unsigned size)
 {
-    HicainVnicState *s = opaque;
+    CnuasVnicState *s = opaque;
 
     switch (addr) {
     case REG_TX_ADDR_LO:
@@ -272,7 +272,7 @@ static uint64_t hicain_vnic_mmio_read(void *opaque, hwaddr addr,
     case REG_RX_LEN:
         return s->rx_len;
     case REG_RX_STATUS:
-        hicain_vnic_check_rx(s);
+        cnuas_vnic_check_rx(s);
         return s->rx_status;
     case REG_IRQ_STATUS:
         return s->irq_status;
@@ -290,16 +290,16 @@ static uint64_t hicain_vnic_mmio_read(void *opaque, hwaddr addr,
                ((uint32_t)s->mac[5] << 8);
     default:
         qemu_log_mask(LOG_GUEST_ERROR,
-                      "hicain-vnic: read from unknown reg 0x%" HWADDR_PRIx "\n",
+                      "cnuas-vnic: read from unknown reg 0x%" HWADDR_PRIx "\n",
                       addr);
         return 0;
     }
 }
 
-static void hicain_vnic_mmio_write(void *opaque, hwaddr addr,
+static void cnuas_vnic_mmio_write(void *opaque, hwaddr addr,
                                     uint64_t val, unsigned size)
 {
-    HicainVnicState *s = opaque;
+    CnuasVnicState *s = opaque;
 
     switch (addr) {
     case REG_TX_ADDR_LO:
@@ -312,7 +312,7 @@ static void hicain_vnic_mmio_write(void *opaque, hwaddr addr,
         s->tx_len = val;
         break;
     case REG_TX_DOORBELL:
-        hicain_vnic_tx(s);
+        cnuas_vnic_tx(s);
         break;
     case REG_RX_ADDR_LO:
         s->rx_addr_lo = val;
@@ -328,28 +328,28 @@ static void hicain_vnic_mmio_write(void *opaque, hwaddr addr,
              * another frame already queued, deliver it now.  Saves
              * one wake-up round-trip per packet at high rates.
              */
-            hicain_vnic_drain_one_rx(s);
+            cnuas_vnic_drain_one_rx(s);
         }
         break;
     case REG_IRQ_STATUS:
         s->irq_status &= ~val;
-        hicain_vnic_update_irq(s);
+        cnuas_vnic_update_irq(s);
         break;
     case REG_IRQ_MASK:
         s->irq_mask = val;
-        hicain_vnic_update_irq(s);
+        cnuas_vnic_update_irq(s);
         break;
     default:
         qemu_log_mask(LOG_GUEST_ERROR,
-                      "hicain-vnic: write to unknown reg 0x%" HWADDR_PRIx "\n",
+                      "cnuas-vnic: write to unknown reg 0x%" HWADDR_PRIx "\n",
                       addr);
         break;
     }
 }
 
-static const MemoryRegionOps hicain_vnic_mmio_ops = {
-    .read = hicain_vnic_mmio_read,
-    .write = hicain_vnic_mmio_write,
+static const MemoryRegionOps cnuas_vnic_mmio_ops = {
+    .read = cnuas_vnic_mmio_read,
+    .write = cnuas_vnic_mmio_write,
     .endianness = DEVICE_LITTLE_ENDIAN,
     .valid = {
         .min_access_size = 4,
@@ -361,7 +361,7 @@ static const MemoryRegionOps hicain_vnic_mmio_ops = {
     },
 };
 
-static int hicain_vnic_connect(HicainVnicState *s)
+static int cnuas_vnic_connect(CnuasVnicState *s)
 {
     struct sockaddr_un addr;
     int fd;
@@ -374,7 +374,7 @@ static int hicain_vnic_connect(HicainVnicState *s)
     fd = socket(AF_UNIX, SOCK_SEQPACKET, 0);
     if (fd < 0) {
         qemu_log_mask(LOG_UNIMP,
-                      "hicain-vnic: socket() failed: %s\n", strerror(errno));
+                      "cnuas-vnic: socket() failed: %s\n", strerror(errno));
         s->link_status = LINK_STATUS_DOWN;
         return -1;
     }
@@ -385,7 +385,7 @@ static int hicain_vnic_connect(HicainVnicState *s)
 
     if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
         qemu_log_mask(LOG_UNIMP,
-                      "hicain-vnic: connect(%s) failed: %s\n",
+                      "cnuas-vnic: connect(%s) failed: %s\n",
                       s->socket_path, strerror(errno));
         close(fd);
         s->link_status = LINK_STATUS_DOWN;
@@ -423,26 +423,26 @@ static int hicain_vnic_connect(HicainVnicState *s)
      * for the guest to poll REG_RX_STATUS.  Read-only watch
      * (NULL write handler); level-triggered.
      */
-    qemu_set_fd_handler(fd, hicain_vnic_rx_event, NULL, s);
+    qemu_set_fd_handler(fd, cnuas_vnic_rx_event, NULL, s);
 
     return 0;
 }
 
-static void hicain_vnic_realize(PCIDevice *pdev, Error **errp)
+static void cnuas_vnic_realize(PCIDevice *pdev, Error **errp)
 {
-    HicainVnicState *s = HICAIN_VNIC(pdev);
+    CnuasVnicState *s = CNUAS_VNIC(pdev);
 
     pci_config_set_interrupt_pin(pdev->config, 1);
     msi_init(pdev, 0, 1, true, false, errp);
 
     if (pcie_endpoint_cap_init(pdev, 0x80) < 0) {
-        error_setg(errp, "hicain-vnic: failed to init PCIe endpoint capability");
+        error_setg(errp, "cnuas-vnic: failed to init PCIe endpoint capability");
         return;
     }
     pcie_cap_fill_link_ep_usp(pdev, s->pcie_width, s->pcie_speed, false);
 
-    memory_region_init_io(&s->mmio, OBJECT(s), &hicain_vnic_mmio_ops, s,
-                          "hicain-vnic-mmio", HICAIN_MMIO_SIZE);
+    memory_region_init_io(&s->mmio, OBJECT(s), &cnuas_vnic_mmio_ops, s,
+                          "cnuas-vnic-mmio", CNUAS_MMIO_SIZE);
     pci_register_bar(pdev, 0, PCI_BASE_ADDRESS_SPACE_MEMORY, &s->mmio);
 
     s->sock_fd = -1;
@@ -475,12 +475,12 @@ static void hicain_vnic_realize(PCIDevice *pdev, Error **errp)
         s->mac[5] = pdev->devfn & 0xff;
     }
 
-    hicain_vnic_connect(s);
+    cnuas_vnic_connect(s);
 }
 
-static void hicain_vnic_exit(PCIDevice *pdev)
+static void cnuas_vnic_exit(PCIDevice *pdev)
 {
-    HicainVnicState *s = HICAIN_VNIC(pdev);
+    CnuasVnicState *s = CNUAS_VNIC(pdev);
 
     if (s->sock_fd >= 0) {
         qemu_set_fd_handler(s->sock_fd, NULL, NULL, NULL);
@@ -492,46 +492,46 @@ static void hicain_vnic_exit(PCIDevice *pdev)
     msi_uninit(pdev);
 }
 
-static const Property hicain_vnic_properties[] = {
-    DEFINE_PROP_STRING("socket_path", HicainVnicState, socket_path),
-    DEFINE_PROP_MACADDR("mac", HicainVnicState, conf_mac),
-    DEFINE_PROP_PCIE_LINK_SPEED("x-speed", HicainVnicState,
+static const Property cnuas_vnic_properties[] = {
+    DEFINE_PROP_STRING("socket_path", CnuasVnicState, socket_path),
+    DEFINE_PROP_MACADDR("mac", CnuasVnicState, conf_mac),
+    DEFINE_PROP_PCIE_LINK_SPEED("x-speed", CnuasVnicState,
                                 pcie_speed, PCIE_LINK_SPEED_32),
-    DEFINE_PROP_PCIE_LINK_WIDTH("x-width", HicainVnicState,
+    DEFINE_PROP_PCIE_LINK_WIDTH("x-width", CnuasVnicState,
                                 pcie_width, PCIE_LINK_WIDTH_16),
 };
 
-static void hicain_vnic_class_init(ObjectClass *klass, const void *data)
+static void cnuas_vnic_class_init(ObjectClass *klass, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
     PCIDeviceClass *k = PCI_DEVICE_CLASS(klass);
 
-    k->realize = hicain_vnic_realize;
-    k->exit = hicain_vnic_exit;
-    k->vendor_id = HICAIN_VENDOR_ID;
-    k->device_id = HICAIN_DEVICE_ID;
+    k->realize = cnuas_vnic_realize;
+    k->exit = cnuas_vnic_exit;
+    k->vendor_id = CNUAS_VENDOR_ID;
+    k->device_id = CNUAS_DEVICE_ID;
     k->class_id = PCI_CLASS_NETWORK_OTHER;
     k->revision = 0x01;
 
     set_bit(DEVICE_CATEGORY_NETWORK, dc->categories);
-    dc->desc = "HiCAIN RoCE-IB-vNIC (Educational RDMA NIC)";
-    device_class_set_props(dc, hicain_vnic_properties);
+    dc->desc = "Cnuas RoCE-IB-vNIC (Educational RDMA NIC)";
+    device_class_set_props(dc, cnuas_vnic_properties);
 }
 
-static const TypeInfo hicain_vnic_info = {
-    .name          = TYPE_HICAIN_VNIC,
+static const TypeInfo cnuas_vnic_info = {
+    .name          = TYPE_CNUAS_VNIC,
     .parent        = TYPE_PCI_DEVICE,
-    .instance_size = sizeof(HicainVnicState),
-    .class_init    = hicain_vnic_class_init,
+    .instance_size = sizeof(CnuasVnicState),
+    .class_init    = cnuas_vnic_class_init,
     .interfaces    = (InterfaceInfo[]) {
         { INTERFACE_PCIE_DEVICE },
         { },
     },
 };
 
-static void hicain_vnic_register_types(void)
+static void cnuas_vnic_register_types(void)
 {
-    type_register_static(&hicain_vnic_info);
+    type_register_static(&cnuas_vnic_info);
 }
 
-type_init(hicain_vnic_register_types)
+type_init(cnuas_vnic_register_types)
