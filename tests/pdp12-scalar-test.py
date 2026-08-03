@@ -695,7 +695,11 @@ def test_privilege_tb_key(qemu, tmpdir):
 def test_rte_valid_atomic_restore(qemu, tmpdir):
     """A valid RTE atomically restores privilege/interrupt state and retires."""
     target = RAM_ENTRY + 0x100
-    restored_fields = 0xC2B  # KUA|MXR|PIE|N|V|C
+    # P0 Sections 5.1, 9 and 10: PPV and PNZVC are software-writable, so a
+    # kernel builds the entire return context -- privilege, interrupt
+    # enable, and condition codes -- and RTE installs it in one step.
+    # KUA|MXR|PNZVC(N|V|C)|PPV=User|PIE|N|V|C
+    restored_fields = 0xBE2B
     insns = (
         load_imm(10, target) +
         [encode_c_type(0, 0, 10, 2)] +
@@ -705,7 +709,10 @@ def test_rte_valid_atomic_restore(qemu, tmpdir):
     regs = run_program(qemu, tmpdir, insns, len(insns), "rte_valid")
 
     assert parse_pc(regs) == target
-    assert parse_pstatus(regs) == 0xEBB
+    # PRV = User (0x80), IE = old PIE (0x10), PIE = 1 (0x20),
+    # PPV = User (0x200), NZVC = PNZVC = N|V|C (0x0B), PNZVC and the
+    # paging fields untouched (0xB000|0x800|0x400).
+    assert parse_pstatus(regs) == 0xBEBB
     assert parse_csr(regs, "EPC") == target
     assert parse_csr(regs, "CAUSE") == 0
     assert parse_csr(regs, "TVAL") == 0
@@ -714,7 +721,15 @@ def test_rte_valid_atomic_restore(qemu, tmpdir):
 
 
 def test_rte_p39_target_fault(qemu, tmpdir):
-    """An invalid P39 epc traps from the unchanged pre-RTE Kernel state."""
+    """RTE does not pre-validate: the target faults in the restored mode.
+
+    P0 Section 10.1.  The first instruction of a freshly exec'd program is
+    by construction not resident, so an RTE that translated its target
+    could never return into one.  RTE therefore completes, and the
+    instruction fetch that follows raises the page fault -- in the restored
+    privilege mode, with epc pointing at the faulting user PC, which is the
+    only form a demand-paging kernel can service.
+    """
     target = 0x40000000
     handler_addr = RAM_ENTRY
     for _ in range(8):
@@ -725,7 +740,8 @@ def test_rte_p39_target_fault(qemu, tmpdir):
             [encode_c_type(0, 0, 10, 2)] +
             load_imm(12, P39_SATP) +
             [encode_c_type(0, 0, 12, 6)] +
-            load_imm(11, 0xC15) +
+            # KUA|MXR|PPV=User|IE|Z|C
+            load_imm(11, 0xE15) +
             [encode_c_type(0, 0, 11, 0)]
         )
         rte_index = len(preamble)
@@ -744,21 +760,24 @@ def test_rte_p39_target_fault(qemu, tmpdir):
         encode_c_type(1, 22, 0, 0),
         encode_nop(),
     ]
+    # The RTE itself now retires, so the handler runs one instruction later.
     regs = run_program(
-        qemu, tmpdir, insns, len(preamble) + 2, "rte_p39_fault",
+        qemu, tmpdir, insns, len(preamble) + 3, "rte_p39_fault",
         payload=p39_payload(insns),
     )
 
     assert parse_csr(regs, "CAUSE") == 12
     assert parse_csr(regs, "TVAL") == target
-    assert parse_csr(regs, "EPC") == RAM_ENTRY + rte_index * 4
-    # Trap entry consumed PRV=Kernel and IE=1 from the unchanged old state.
+    # epc is the unmapped user PC, not the address of the RTE.
+    assert parse_csr(regs, "EPC") == target
+    # Trap entry consumed PRV=User, so PPV=User; IE was 0 on entry to User
+    # because the written PIE was 0, so PIE is 0 here too.
     pstatus = parse_pstatus(regs)
-    assert pstatus == 0xC25, f"post-RTE-fault pstatus={pstatus:#x}"
-    assert parse_reg(regs, "x22") == 0xC25
+    assert pstatus == 0xE00, f"post-RTE-fault pstatus={pstatus:#x}"
+    assert parse_reg(regs, "x22") == 0xE00
     assert parse_reg(regs, "x21") != 99
-    assert parse_retired(regs) == len(preamble) + 2
-    print("  RTE invalid P39 target precision and old-state trap entry: PASS")
+    assert parse_retired(regs) == len(preamble) + 3
+    print("  RTE target fault is precise at the target in User mode: PASS")
 
 
 def test_jmp_precise_bare_faults(qemu, tmpdir):

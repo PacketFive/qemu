@@ -119,6 +119,7 @@ function pstatusValue(flags, privileged) {
   value |= privileged.previousInterruptEnable ? 1n << 5n : 0n;
   value |= BigInt(privileged.mode) << 6n;
   value |= BigInt(privileged.previousMode) << 8n;
+  value |= BigInt(privileged.previousFlags ?? 0) << 12n;
   if (privileged.paging !== undefined) {
     value |= privileged.paging.kua ? (1n << 10n) : 0n;
     value |= privileged.paging.mxr ? (1n << 11n) : 0n;

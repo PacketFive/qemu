@@ -105,8 +105,13 @@ def build_setup(vector):
                 f"{vector['name']}: illegal register {register}")
         insns += load_imm(register, int(value, 16))
     flags = vector["flags"]
+    # The reference emulator's start state is Kernel mode with PPV = User,
+    # which is the P0 reset state.  Since P0 Section 5.1 made PPV
+    # software-writable, this write has to reinstate it explicitly or it
+    # would install PPV = Kernel and diverge from the recorded vector.
     pstatus = ((1 if flags["c"] else 0) | (2 if flags["v"] else 0) |
-               (4 if flags["z"] else 0) | (8 if flags["n"] else 0))
+               (4 if flags["z"] else 0) | (8 if flags["n"] else 0) |
+               (2 << 8))
     insns += load_imm(SCRATCH, pstatus)
     insns.append(encode_csrrw(0, SCRATCH, CSR_NUMBERS["pstatus"]))
     # Branch to the instruction under test without disturbing the flags.
