@@ -89,8 +89,30 @@
 #define PSTATUS_MXR   BIT(11)
 #define PSTATUS_NZVC  (PSTATUS_N | PSTATUS_Z | PSTATUS_V | PSTATUS_C)
 
-/* Writable bits via CSR write: NZVC, IE, PIE, KUA, MXR */
-#define PSTATUS_WRITABLE 0xc3f
+/*
+ * PNZVC holds the condition codes the interrupted instruction stream left
+ * behind.  The condition codes live in pstatus, and almost every instruction
+ * writes them -- MOV sets N and Z -- so a trap handler destroys them before it
+ * can execute a single instruction to save them.  Trap entry therefore has to
+ * copy them somewhere the handler will not disturb, exactly as the PDP-11
+ * pushes PS and the VAX pushes PSL.  RTE copies them back.
+ */
+#define PSTATUS_PNZVC_SHIFT 12
+#define PSTATUS_PNZVC (PSTATUS_NZVC << PSTATUS_PNZVC_SHIFT)
+
+/*
+ * Writable bits via CSR write: NZVC, IE, PIE, PPV, KUA, MXR, PNZVC.
+ *
+ * PPV has to be writable.  RTE leaves PPV = User, so once a trap handler is
+ * re-entered -- a kernel trap that itself takes a trap, which is the normal
+ * case as soon as interrupts are re-enabled inside a handler -- the inner RTE
+ * destroys the outer frame's PPV and the outer RTE would resume kernel code in
+ * User mode.  The only way to make nesting work is to let the handler restore
+ * the field from its saved frame, which is exactly what RISC-V does with
+ * sstatus.SPP, the VAX with PSL<PRVMOD> and the PDP-11 with PS<13:12>.
+ * PRV itself stays read-only: current privilege changes only via trap and RTE.
+ */
+#define PSTATUS_WRITABLE 0xff3f
 
 /* Privilege modes */
 #define PDP12_PRV_KERNEL 0

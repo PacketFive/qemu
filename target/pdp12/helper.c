@@ -113,9 +113,15 @@ static void pdp12_enter_trap(CPUPDP12State *env, uint64_t cause,
     ie = (pstatus >> 4) & 1;
 
     pstatus &= ~(PSTATUS_PPV_MASK | PSTATUS_PIE | PSTATUS_IE |
-                 PSTATUS_PRV_MASK);
+                 PSTATUS_PRV_MASK | PSTATUS_PNZVC);
     pstatus |= (prv << PSTATUS_PPV_SHIFT);   /* PPV = old PRV */
     pstatus |= (ie << 5);                    /* PIE = old IE */
+    /*
+     * P0 Section 9: PNZVC = old NZVC.  The handler's first instruction
+     * overwrites NZVC, so hardware has to preserve them here or they cannot
+     * be preserved at all.
+     */
+    pstatus |= (pstatus & PSTATUS_NZVC) << PSTATUS_PNZVC_SHIFT;
     /* IE = 0 and PRV = Kernel = 0 are already cleared */
     env->pstatus = pstatus;
 
@@ -189,9 +195,20 @@ G_NORETURN void helper_illegal(CPUPDP12State *env, uint32_t insn)
 }
 
 /*
- * P0 Section 10 and P1 Section 12: validate all RTE state before committing
- * any of it.  In P39 mode, every aligned translation or access failure is
- * reported as an instruction page fault at the rejected epc.
+ * P0 Section 10 and P1 Section 12: validate the RTE state that hardware can
+ * decide locally before committing any of it.
+ *
+ * RTE deliberately does *not* pre-validate that `epc` is translatable or
+ * executable under the restored privilege.  A demand-paged user page is
+ * legitimately absent at the moment of return, and pre-validating it reports
+ * the fault at the RTE, in the old privilege mode, with the old `epc` about
+ * to be overwritten -- an imprecise and unrecoverable trap.  Every machine
+ * with demand paging does the opposite: PDP-11 RTT, VAX REI, RISC-V SRET,
+ * AArch64 ERET and x86 IRET all commit the privilege change and let the
+ * instruction fetch at the new PC fault naturally, in the new mode, so the
+ * handler sees a precise user-mode instruction fetch fault it can service.
+ * Alignment is different: it is a property of `epc` alone, needs no
+ * translation, and cannot be repaired by a fault handler, so it stays here.
  */
 void helper_rte(CPUPDP12State *env, uint32_t insn)
 {
@@ -199,35 +216,28 @@ void helper_rte(CPUPDP12State *env, uint32_t insn)
     uint64_t ppv = (old_pstatus & PSTATUS_PPV_MASK) >> PSTATUS_PPV_SHIFT;
     uint64_t epc = env->epc;
     uint64_t new_pstatus;
-    uint64_t cause;
-    PDP12InstructionTargetFault fault;
-    bool p39_active = (env->satp >> 60) == 1;
 
     if (ppv != PDP12_PRV_KERNEL && ppv != PDP12_PRV_USER) {
         pdp12_raise_exception(env, PDP12_CAUSE_ILLEGAL_INSN,
                               insn, GETPC());
     }
 
-    fault = pdp12_validate_instruction_target(env, epc, ppv);
-    if (fault != PDP12_TARGET_OK) {
-        if (fault == PDP12_TARGET_MISALIGNED) {
-            cause = PDP12_CAUSE_INSN_ADDR_MISALIGNED;
-        } else if (p39_active) {
-            cause = PDP12_CAUSE_INSN_PAGE_FAULT;
-        } else {
-            cause = PDP12_CAUSE_INSN_ACCESS_FAULT;
-        }
-        pdp12_raise_exception(env, cause, epc, GETPC());
+    if (epc & 3) {
+        pdp12_raise_exception(env, PDP12_CAUSE_INSN_ADDR_MISALIGNED,
+                              epc, GETPC());
     }
 
     new_pstatus = old_pstatus &
-        ~(PSTATUS_PRV_MASK | PSTATUS_PPV_MASK | PSTATUS_IE | PSTATUS_PIE);
+        ~(PSTATUS_PRV_MASK | PSTATUS_PPV_MASK | PSTATUS_IE | PSTATUS_PIE |
+          PSTATUS_NZVC);
     new_pstatus |= ppv << PSTATUS_PRV_SHIFT;
     if (old_pstatus & PSTATUS_PIE) {
         new_pstatus |= PSTATUS_IE;
     }
     new_pstatus |= PSTATUS_PIE;
     new_pstatus |= (uint64_t)PDP12_PRV_USER << PSTATUS_PPV_SHIFT;
+    /* P0 Section 10: NZVC = PNZVC, undoing what the handler wrote. */
+    new_pstatus |= (old_pstatus & PSTATUS_PNZVC) >> PSTATUS_PNZVC_SHIFT;
 
     env->pstatus = new_pstatus;
     env->pc = epc;
