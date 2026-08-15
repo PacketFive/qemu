@@ -49,6 +49,13 @@ DECLARE_INSTANCE_CHECKER(CnuasGpuState, CNUASGPU, TYPE_CNUAS_CNUASGPU)
 
 #define CNUASGPU_BAR0_SIZE     (64 * KiB)
 #define CNUASGPU_BAR1_SIZE_DEFAULT  (256 * MiB)
+/*
+ * The lower bound leaves room for the CnuasLink staging area the driver
+ * carves off the top of device memory. The upper bound is a sanity limit,
+ * not an architectural one: BAR1 is 64-bit, so the ceiling is host memory.
+ */
+#define CNUASGPU_DEVMEM_MIN    (16 * MiB)
+#define CNUASGPU_DEVMEM_MAX    (1024ULL * GiB)
 #define CNUASGPU_LINK_MAX_FRAME (64u * 1024u)
 
 #define REG_VENDOR_ID       0x000
@@ -429,6 +436,26 @@ static void cnuasgpu_realize(PCIDevice *pdev, Error **errp)
                           "cnuasgpu-bar0", CNUASGPU_BAR0_SIZE);
     pci_register_bar(pdev, 0, PCI_BASE_ADDRESS_SPACE_MEMORY, &s->bar0);
 
+    /*
+     * Device memory is exposed through a 64-bit prefetchable BAR, as real
+     * accelerators with multi-gigabyte memories do. A 32-bit BAR cannot
+     * describe a region of 4 GiB or more, so sizes useful for model weights
+     * would be accepted here and then prove unmappable in the guest.
+     */
+    if (s->devmem_size < CNUASGPU_DEVMEM_MIN ||
+        s->devmem_size > CNUASGPU_DEVMEM_MAX) {
+        error_setg(errp, "cnuasgpu: devmem_size must be between %llu and %llu "
+                   "bytes, got %" PRIu64,
+                   (unsigned long long)CNUASGPU_DEVMEM_MIN,
+                   (unsigned long long)CNUASGPU_DEVMEM_MAX, s->devmem_size);
+        return;
+    }
+    if (!is_power_of_2(s->devmem_size)) {
+        error_setg(errp, "cnuasgpu: devmem_size must be a power of two, "
+                   "got %" PRIu64, s->devmem_size);
+        return;
+    }
+
     memory_region_init_ram(&s->bar1, OBJECT(s), "cnuasgpu-devmem",
                            s->devmem_size, errp);
     if (*errp) {
@@ -436,7 +463,8 @@ static void cnuasgpu_realize(PCIDevice *pdev, Error **errp)
     }
     pci_register_bar(pdev, 1,
                      PCI_BASE_ADDRESS_SPACE_MEMORY |
-                         PCI_BASE_ADDRESS_MEM_PREFETCH,
+                         PCI_BASE_ADDRESS_MEM_PREFETCH |
+                         PCI_BASE_ADDRESS_MEM_TYPE_64,
                      &s->bar1);
 
     s->irq_status = 0;
@@ -461,8 +489,8 @@ static const Property cnuasgpu_properties[] = {
     DEFINE_PROP_UINT32("sm_count", CnuasGpuState, sm_count, 16),
     DEFINE_PROP_UINT32("lanes_per_sm", CnuasGpuState, lanes_per_sm, 32),
     DEFINE_PROP_UINT32("tensor_size", CnuasGpuState, tensor_size, 16),
-    DEFINE_PROP_UINT64("devmem_size", CnuasGpuState, devmem_size,
-                       CNUASGPU_BAR1_SIZE_DEFAULT),
+    DEFINE_PROP_SIZE("devmem_size", CnuasGpuState, devmem_size,
+                     CNUASGPU_BAR1_SIZE_DEFAULT),
     DEFINE_PROP_STRING("cnuaslink_socket", CnuasGpuState, cnuaslink_socket),
     DEFINE_PROP_PCIE_LINK_SPEED("x-speed", CnuasGpuState,
                                 pcie_speed, PCIE_LINK_SPEED_32),
