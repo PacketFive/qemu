@@ -3938,20 +3938,20 @@ F: include/hw/i2c/smbus_slave.h
 F: include/hw/i2c/smbus_eeprom.h
 
 CMIS optical module
-M: Weqaar Janjua <weqaar.janjua@gmail.com>
+M: Weqaar Janjua <weqaar.janjua@packetfive.com>
 S: Maintained
 F: hw/i2c/cmis_module.c
 F: docs/specs/cmis-module.rst
 F: tests/qtest/cmis-module-test.c
 
 Cnuas virtual NIC
-M: Weqaar Janjua <weqaar.janjua@gmail.com>
+M: Weqaar Janjua <weqaar.janjua@packetfive.com>
 S: Maintained
 F: hw/net/cnuas_vnic.c
 F: docs/specs/cnuas-vnic.rst
 
 CnuasGPU virtual accelerator
-M: Weqaar Janjua <weqaar.janjua@gmail.com>
+M: Weqaar Janjua <weqaar.janjua@packetfive.com>
 S: Maintained
 F: hw/misc/cnuasgpu.c
 F: docs/specs/cnuasgpu.rst
